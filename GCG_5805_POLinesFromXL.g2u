@@ -1,0 +1,367 @@
+Program.Sub.Preflight.Start
+Program.External.Include.Library("UPLPUROR.lib")
+V.Global.sErrorLog.Declare(String, "")
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+'This project was created for Miller Industries. We are going to be creating/updating OrderLines from an excel spreadsheet.
+'The proeject will begin by requesting they select an excel sheet, then it will parse the file and use that information to create POs
+'Created by FEQ on 12/10/2019
+
+F.Intrinsic.Control.Try
+V.Local.sError.Declare(String, "")
+
+F.Intrinsic.Control.CallSub(RequestFile)
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.String.Build("Project: {0}{1}{1}Subroutine: {2}{1}Error Occurred {3} with description {4}{1}{1}GAB Version: {5}",V.Ambient.ScriptPath,V.Ambient.Newline,V.Ambient.CurrentSubroutine,V.Ambient.ErrorNumber,V.Ambient.ErrorDescription,V.Ambient.GABVersion,V.Local.sError)
+	F.Intrinsic.UI.Msgbox(V.Local.sError)
+	F.Intrinsic.Control.CallSub(Unload)
+F.Intrinsic.Control.EndTry
+Program.Sub.Main.End
+
+Program.Sub.Unload.Start
+F.Intrinsic.Control.Try
+V.Local.sError.Declare(String, "")
+V.Local.sExttn.Declare(String, "")
+V.Local.sFileN.Declare(String, "")
+
+'We are going to save the error log if we have anything in there.
+F.Intrinsic.Control.If(V.Global.sErrorLog.Trim, <>, "")
+	F.Intrinsic.String.Format(V.Ambient.Now, "YYMMDD", V.Local.sExttn)
+	F.Intrinsic.String.Build("{0}\{1}POERRORS{2}", V.Caller.FilesDir, V.Caller.CompanyCode, V.Local.sExttn, V.Local.sFileN)
+	F.Intrinsic.File.String2File(V.Local.sFileN, V.Global.sErrorLog)
+F.Intrinsic.Control.EndIf
+
+F.Intrinsic.UI.CloseWaitDialog
+F.Intrinsic.Control.End
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.String.Build("Project: {0}{1}{1}Subroutine: {2}{1}Error Occurred {3} with description {4}{1}{1}GAB Version: {5}",V.Ambient.ScriptPath,V.Ambient.Newline,V.Ambient.CurrentSubroutine,V.Ambient.ErrorNumber,V.Ambient.ErrorDescription,V.Ambient.GABVersion,V.Local.sError)
+	F.Intrinsic.UI.Msgbox(V.Local.sError)
+	F.Intrinsic.Control.End
+F.Intrinsic.Control.EndTry
+Program.Sub.Unload.End
+
+Program.Sub.RequestFile.Start
+F.Intrinsic.Control.Try
+V.Local.sError.Declare(String, "")
+V.Local.sExttn.Declare(String, "")
+V.Local.sFileN.Declare(String, "")
+
+'Open File Browser and Save File as variable sFile
+F.Intrinsic.UI.ShowOpenFileDialog("","*.xlsx","C:\",V.Local.sFileN)
+
+F.Intrinsic.Control.If(V.Local.sFileN, <>, "***CANCEL***")
+	F.Intrinsic.String.Split(V.Local.sFileN, ".", V.Local.sExttn)
+	F.Intrinsic.Control.SelectCase(V.Local.sExttn(V.Local.sExttn.UBound).UCase)
+		F.Intrinsic.Control.Case("XLSX")
+			F.Intrinsic.Control.CallSub(POEntry, "File", V.Local.sFileN)
+			
+		F.Intrinsic.Control.CaseElse
+			F.Intrinsic.UI.Msgbox("Please select an Excel file", "FILE ERROR")
+			F.Intrinsic.Control.CallSub(Unload)
+			
+	F.Intrinsic.Control.EndSelect
+	
+F.Intrinsic.Control.Else
+	F.Intrinsic.Control.CallSub(Unload)
+F.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.String.Build("Project: {0}{1}{1}Subroutine: {2}{1}Error Occurred {3} with description {4}{1}{1}GAB Version: {5}",V.Ambient.ScriptPath,V.Ambient.Newline,V.Ambient.CurrentSubroutine,V.Ambient.ErrorNumber,V.Ambient.ErrorDescription,V.Ambient.GABVersion,V.Local.sError)
+	F.Intrinsic.UI.Msgbox(V.Local.sError)
+	F.Intrinsic.Control.CallSub(Unload)
+F.Intrinsic.Control.EndTry
+Program.Sub.RequestFile.End
+
+Program.Sub.POEntry.Start
+F.Intrinsic.Control.Try
+V.Local.sError.Declare(String, "")
+V.Local.sFileN.Declare(String, "")
+V.Local.sXLDat.Declare(String, "")
+V.Local.sLines.Declare(String, "")
+V.Local.sCntnt.Declare(String, "")
+V.Local.sTitls.Declare(String, "")
+V.Local.sTypes.Declare(String, "")
+V.Local.sPONum.Declare(String, "")
+V.Local.sQuery.Declare(String, "")
+V.Local.sCheck.Declare(String, "")
+V.Local.sPOErr.Declare(String, "")
+V.Local.sParam.Declare(String, "")
+V.Local.iNumbr.Declare(Long, 0)
+
+'This is using an excel file
+V.Local.sFileN.Set(V.Args.File)
+
+F.ODBC.Connection!conx.OpenCompanyConnection
+
+F.Intrinsic.UI.InvokeWaitDialog("Parsing file", "Purchase Order")
+F.Automation.MSExcel.ReadSpreadsheet(V.Local.sFileN, V.Local.sXLDat)
+F.Intrinsic.String.Split(V.Local.sXLDat, "&!&", V.Local.sXLDat)
+F.Intrinsic.Control.If(V.Local.sXLDat(0).Trim, <>, "")
+	F.Intrinsic.String.Split(V.Local.sXLDat(0).Trim, "$!$", V.Local.sLines)
+	F.Intrinsic.Variable.PopArray(V.Local.sLines, V.Local.sLines)
+	'Sometimes with excel spreadsheets, itll grab one blank line at the end
+	F.Intrinsic.Control.If(V.Local.sLines(V.Local.sLines.UBound).Trim, =, "")
+		F.Intrinsic.Math.Sub(V.Local.sLines.UBound, 1, V.Local.iNumbr)
+		V.Local.sLines.RedimPreserve(0,V.Local.iNumbr)
+	F.Intrinsic.Control.EndIf	
+	F.Intrinsic.String.Join(V.Local.sLines, "@!@", V.Local.sCntnt)
+	
+	V.Local.sTitls.Set("PONumb*!*VendNM*!*VendCD*!*PartNo*!*Descrp*!*Quntty*!*PtCost*!*XtCost*!*UntMsr*!*ProdLn*!*DuDate*!*WONumb*!*WOSuff*!*WOSeqc*!*GLAcct")
+	V.Local.sTypes.Set("String*!*String*!*String*!*String*!*String*!*String*!*String*!*String*!*String*!*String*!*String*!*String*!*String*!*String*!*String")
+	
+'	V.Local.sTitls.Set("PONumb*!*VendNM*!*VendCD*!*PartNo*!*Descrp*!*Quntty*!*PtCost*!*XtCost*!*UntMsr*!*ProdLn*!*DuDate*!*WONumb*!*WOSuff*!*WOSeqc")
+'	V.Local.sTypes.Set("String*!*String*!*String*!*String*!*String*!*String*!*String*!*String*!*String*!*String*!*String*!*String*!*String*!*String")
+	
+	F.Data.DataTable.CreateFromString("dtPOEntry", V.Local.sCntnt, V.Local.sTitls, V.Local.sTypes, "*!*", "@!@", True)
+	
+	F.Intrinsic.Control.CallSub(FillOrderTables)
+	
+	F.Intrinsic.UI.ChangeWaitStatus("Creating Purchase Order")
+	
+	F.Intrinsic.Control.If(V.DataTable.UPLPURORL.RowCount, >, 0)
+		
+		F.Intrinsic.String.LPad(V.DataTable.UPLPURORL(0).PONum!FieldVal, "0", 7, V.Local.sPONum)
+		
+		F.Intrinsic.Control.CallSub(UPLPURORSync)
+		
+		F.Intrinsic.UI.CloseWaitDialog
+		
+		F.Intrinsic.String.Build("Select PURCHASE_ORDER from V_PO_HEADER where PURCHASE_ORDER = '{0}'", V.Local.sPONum, V.Local.sQuery)
+		F.ODBC.Connection!conx.ExecuteAndReturn(V.Local.sQuery, V.Local.sCheck)
+		F.Intrinsic.Control.If(V.Local.sCheck.Trim, =, "")
+			'Add file to the list of errors
+			F.Intrinsic.String.Build("PO Creation Error. Order Number {0} does not appear to be created in the system.{1}", V.Local.sPONum, V.Ambient.NewLine, V.Local.sPOErr)
+			F.Intrinsic.String.Build("{0}{2}Attempted to be created from file: {2}{1}.{2}", V.Local.sPOErr, V.Args.File, V.Ambient.NewLine, V.Local.sPOErr)
+			F.Intrinsic.UI.Msgbox(V.Local.sPOErr, "ERROR CREATING PO")
+			
+		F.Intrinsic.Control.Else
+		
+			F.Intrinsic.String.Build("O!*!{0}!*!", V.Local.sPONum, V.Local.sParam)
+			'Display the PO on the screen.
+			F.Global.General.CallWrapperAsync(175200, V.Local.sParam)
+			
+		F.Intrinsic.Control.EndIf
+		
+	F.Intrinsic.Control.Else
+		'Print some sort of error message	
+		F.Intrinsic.String.Build("PO Creation Error. Order lines in file do not appear to be parsed correctly.{1}", V.Ambient.NewLine, V.Local.sPOErr)
+		F.Intrinsic.String.Build("{0}{2}Attempted to be created from file: {2}{1}.{2}", V.Local.sPOErr, V.Args.File, V.Ambient.NewLine, V.Local.sPOErr)
+		F.Intrinsic.UI.Msgbox(V.Local.sPOErr, "ERROR CREATING PO")
+		
+	F.Intrinsic.Control.EndIf
+	
+F.Intrinsic.Control.Else
+	'Print no data error and exit script.
+	
+	F.Intrinsic.Control.CallSub(Unload)
+F.Intrinsic.Control.EndIf
+
+F.ODBC.Connection!conx.Close
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.String.Build("Project: {0}{1}{1}Subroutine: {2}{1}Error Occurred {3} with description {4}{1}{1}GAB Version: {5}",V.Ambient.ScriptPath,V.Ambient.Newline,V.Ambient.CurrentSubroutine,V.Ambient.ErrorNumber,V.Ambient.ErrorDescription,V.Ambient.GABVersion,V.Local.sError)
+	F.Intrinsic.UI.Msgbox(V.Local.sError)
+	F.Intrinsic.Control.CallSub(Unload)
+F.Intrinsic.Control.EndTry
+Program.Sub.POEntry.End
+
+Program.Sub.FillOrderTables.Start
+F.Intrinsic.Control.Try
+V.Local.sError.Declare(String, "")
+V.Local.sPONum.Declare(String, "")
+V.Local.sDueDt.Declare(String, "")
+V.Local.sOrdDt.Declare(String, "")
+V.Local.sNowDt.Declare(String, "")
+V.Local.sVndCd.Declare(String, "")
+V.Local.sVndNm.Declare(String, "")
+V.Local.sAddy1.Declare(String, "")
+V.Local.sAddy2.Declare(String, "")
+V.Local.sCity1.Declare(String, "")
+V.Local.sState.Declare(String, "")
+V.Local.sZipCD.Declare(String, "")
+V.Local.sAttnt.Declare(String, "")
+V.Local.sCntry.Declare(String, "")
+V.Local.sWONum.Declare(String, "")
+V.Local.sWOSuf.Declare(String, "")
+V.Local.sWOSeq.Declare(String, "")
+V.Local.sQuery.Declare(String, "")
+V.Local.sOrdLn.Declare(String, "")
+V.Local.sPrtNo.Declare(String, "")
+V.Local.sPtDsc.Declare(String, "")
+V.Local.sPtCst.Declare(String, "")
+V.Local.sQuant.Declare(String, "")
+V.Local.sXTAmt.Declare(String, "")
+V.Local.sPrtUM.Declare(String, "")
+V.Local.sGLAct.Declare(String, "")
+V.Local.iDrcla.Declare(Long, 0)
+V.Local.iOrdLn.Declare(Long, 0)
+V.Local.bOrdCk.Declare(Boolean, True)
+
+V.Local.sPONum.Set(V.DataTable.dtPOEntry(0).PONumb!FieldValTrim)
+
+'If we got to this point, we have the data loaded into datatable dtPOEntry
+F.Intrinsic.Control.If(V.Local.sPONum, =, "")
+	'We need to grab a new PO number
+	F.Global.General.ReadOption(400301, 3, "", V.Local.sPONum)
+	F.Intrinsic.Math.Add(V.Local.sPONum.Long, 1, V.Local.sPONum)
+	F.Intrinsic.String.LPad(V.Local.sPONum, "0", 7, V.Local.sPONum)
+	F.Intrinsic.Control.DoUntil(V.Local.bOrdCk, =, False)
+		F.Intrinsic.String.Build("Select Top 1 PURCHASE_ORDER from V_PO_HEADER where PURCHASE_ORDER = '{0}'", V.Local.sPONum, V.Local.sQuery)
+		F.Data.DataTable.CreateFromSQL("dtPOCheck", "conx", V.Local.sQuery, True)
+		F.Intrinsic.Control.If(V.DataTable.dtPOCheck.RowCount, =, 0)
+			V.Local.bOrdCk.Set(False)
+		F.Intrinsic.Control.Else
+			F.Intrinsic.Math.Add(V.Local.sPONum.Long, 1, V.Local.sPONum)
+			F.Intrinsic.String.LPad(V.Local.sPONum, "0", 7, V.Local.sPONum)
+		F.Intrinsic.Control.EndIf
+		F.Data.DataTable.Close("dtPOCheck")		
+	F.Intrinsic.Control.Loop
+	
+F.Intrinsic.Control.EndIf
+
+F.Intrinsic.String.LPad(V.Local.sPONum, "0", 7, V.Local.sPONum)
+
+V.Local.sVndNm.Set(V.DataTable.dtPOEntry(0).VendNM!FieldValTrim)
+V.Local.sVndCd.Set(V.DataTable.dtPOEntry(0).VendCD!FieldValTrim)
+
+'We need to pull the Vendor information from the system..
+F.Intrinsic.String.Build("select top 1 NAME_VENDOR, ADDRESS1, ADDRESS2, CITY, STATE, CODE_ZIP, COUNTRY, ATTENTION from V_VENDOR_MASTER Where Vendor = '{0}'", V.Local.sVndCd, V.Local.sQuery)
+F.Data.DataTable.CreateFromSQL("dtVendInfo", "conx", V.Local.sQuery, True)
+F.Intrinsic.Control.If(V.DataTable.dtVendInfo.RowCount, =, 0)
+	
+	F.Intrinsic.String.Build("{0}{1}Vendor {2} cannot be found in system", V.Global.sErrorLog, V.Ambient.NewLine, V.Local.sVndCd, V.Global.sErrorLog)
+	F.Intrinsic.Control.CallSub(Unload)
+	F.Data.DataTable.AddRow("dtVendInfo", "NAME_VENDOR", "")
+F.Intrinsic.Control.EndIf
+
+F.Intrinsic.String.RPad(V.DataTable.dtVendInfo(0).ADDRESS1!FieldValTrim, " ", 30, V.Local.sAddy1)
+F.Intrinsic.String.RPad(V.DataTable.dtVendInfo(0).ADDRESS2!FieldValTrim, " ", 30, V.Local.sAddy2)
+F.Intrinsic.String.RPad(V.DataTable.dtVendInfo(0).CITY!FieldValTrim, " ", 20, V.Local.sCity1)
+F.Intrinsic.String.RPad(V.DataTable.dtVendInfo(0).STATE!FieldValTrim, " ", 2, V.Local.sState)
+F.Intrinsic.String.RPad(V.DataTable.dtVendInfo(0).CODE_ZIP!FieldValTrim, " ", 13, V.Local.sZipCD)
+F.Intrinsic.String.RPad(V.DataTable.dtVendInfo(0).COUNTRY!FieldValTrim, " ", 12, V.Local.sCntry)
+F.Intrinsic.String.RPad(V.DataTable.dtVendInfo(0).ATTENTION!FieldValTrim, " ", 30, V.Local.sAttnt)
+
+F.Data.DataTable.Close("dtVendInfo")
+
+F.Intrinsic.String.Split(V.DataTable.dtPOEntry(0).DuDate!FieldVal, " ", V.Local.sNowDt)
+F.Intrinsic.String.Replace(V.Local.sNowDt(0), V.Ambient.DblQuote, "", V.Local.sNowDt)
+F.Intrinsic.String.Split(V.Local.sNowDt(0), "/", V.Local.sNowDt)
+V.Local.sNowDt.RedimPreserve(0, 2)
+F.Intrinsic.String.LPad(V.Local.sNowDt(0), "0", 2, V.Local.sNowDt(0))
+F.Intrinsic.String.LPad(V.Local.sNowDt(1), "0", 2, V.Local.sNowDt(1))
+F.Intrinsic.String.Right(V.Local.sNowDt(2), 2, V.Local.sNowDt(2))
+F.Intrinsic.String.Build("{0}{1}{2}", V.Local.sNowDt(0), V.Local.sNowDt(1), V.Local.sNowDt(2), V.Local.sDueDt)
+
+
+F.Intrinsic.String.Split(V.Ambient.Now, " ", V.Local.sNowDt)
+F.Intrinsic.String.Replace(V.Local.sNowDt(0), V.Ambient.DblQuote, "", V.Local.sNowDt)
+F.Intrinsic.String.Split(V.Local.sNowDt(0), "/", V.Local.sNowDt)
+V.Local.sNowDt.RedimPreserve(0, 2)
+F.Intrinsic.String.LPad(V.Local.sNowDt(0), "0", 2, V.Local.sNowDt(0))
+F.Intrinsic.String.LPad(V.Local.sNowDt(1), "0", 2, V.Local.sNowDt(1))
+F.Intrinsic.String.Right(V.Local.sNowDt(2), 2, V.Local.sNowDt(2))
+F.Intrinsic.String.Build("{0}{1}{2}", V.Local.sNowDt(0), V.Local.sNowDt(1), V.Local.sNowDt(2), V.Local.sOrdDt)
+
+'F.Intrinsic.String.LPad(V.DataTable.dtPOEntry(0).WONumb!FieldValTrim, "0", 6, V.Local.sWONum)
+'F.Intrinsic.String.Right(V.Local.sWONum, 6, V.Local.sWONum)
+'F.Intrinsic.String.LPad(V.DataTable.dtPOEntry(0).WOSuff!FieldValTrim, " ", 3, V.Local.sWOSuf)
+'F.Intrinsic.String.Right(V.Local.sWOSuf, 3, V.Local.sWOSuf)
+
+F.Intrinsic.String.LPad(V.DataTable.dtPOEntry(0).WONumb!FieldValTrim, "0", 6, V.Local.sWONum)
+F.Intrinsic.String.Right(V.Local.sWONum, 6, V.Local.sWONum)
+F.Intrinsic.String.LPad(V.DataTable.dtPOEntry(0).WOSuff!FieldValTrim, " ", 3, V.Local.sWOSuf)
+F.Intrinsic.String.Right(V.Local.sWOSuf, 3, V.Local.sWOSuf)
+
+V.Local.sWONum.Set(V.DataTable.dtPOEntry(0).WONumb!FieldValTrim)
+V.Local.sWOSuf.Set(V.DataTable.dtPOEntry(0).WOSuff!FieldValTrim)
+
+'F.Data.DataTable.AddRow("UPLPURORA", "PONum", V.Local.sPONum, "RecType", "A", "POOrderDate", V.Local.sOrdDt, "VendNum", V.Local.sVndCd, "DateRequried", V.Local.sDueDt, "DueDate", V.Local.sDueDt, "WONum", V.Local.sWONum, "WOSuffix", V.Local.sWOSuf)
+
+F.Data.DataTable.AddRow("UPLPURORA", "PONum", V.Local.sPONum, "RecType", "A", "POOrderDate", V.Local.sOrdDt, "VendNum", V.Local.sVndCd, "DateRequried", V.Local.sDueDt, "DueDate", V.Local.sDueDt)
+
+F.Data.DataTable.AddRow("UPLPURORBC", "PONum", V.Local.sPONum, "RecType", "B", "VendName", V.Local.sVndNm, "VendAddr1", V.Local.sAddy1, "VendAddr2", V.Local.sAddy2, "VendCity", V.Local.sCity1, "VendState", V.Local.sState, "VendZip", V.Local.sZipCD, "VendAttn", V.Local.sAttnt, "VendCountry", V.Local.sCntry)
+
+'We need to make a 'C' sequence for the shipping information. This is all the address stuff for the company itself.
+F.Data.DataTable.CreateFromSQL("dtCompInfo", "conx", "select top 1 NAME_VENDOR, ADDRESS1, ADDRESS2, CITY, STATE, CODE_ZIP, COUNTRY, ATTENTION from V_VENDOR_MASTER Where RESV = '1'", True)
+F.Intrinsic.Control.If(V.DataTable.dtCompInfo.RowCount, =, 0)
+	F.Data.DataTable.AddRow("dtCompInfo", "NAME_VENDOR", "")
+F.Intrinsic.Control.EndIf
+
+F.Intrinsic.String.RPad(V.DataTable.dtCompInfo(0).NAME_VENDOR!FieldValTrim, " ", 30, V.Local.sVndNm)
+F.Intrinsic.String.RPad(V.DataTable.dtCompInfo(0).ADDRESS1!FieldValTrim, " ", 30, V.Local.sAddy1)
+F.Intrinsic.String.RPad(V.DataTable.dtCompInfo(0).ADDRESS2!FieldValTrim, " ", 30, V.Local.sAddy2)
+F.Intrinsic.String.RPad(V.DataTable.dtCompInfo(0).CITY!FieldValTrim, " ", 20, V.Local.sCity1)
+F.Intrinsic.String.RPad(V.DataTable.dtCompInfo(0).STATE!FieldValTrim, " ", 2, V.Local.sState)
+F.Intrinsic.String.RPad(V.DataTable.dtCompInfo(0).CODE_ZIP!FieldValTrim, " ", 13, V.Local.sZipCD)
+F.Intrinsic.String.RPad(V.DataTable.dtCompInfo(0).COUNTRY!FieldValTrim, " ", 12, V.Local.sCntry)
+F.Intrinsic.String.RPad(V.DataTable.dtCompInfo(0).ATTENTION!FieldValTrim, " ", 30, V.Local.sAttnt)
+
+F.Data.DataTable.Close("dtCompInfo")
+
+F.Data.DataTable.AddRow("UPLPURORBC", "PONum", V.Local.sPONum, "RecType", "C", "VendName", V.Local.sVndNm, "VendAddr1", V.Local.sAddy1, "VendAddr2", V.Local.sAddy2, "VendCity", V.Local.sCity1, "VendState", V.Local.sState, "VendZip", V.Local.sZipCD, "VendAttn", V.Local.sAttnt, "VendCountry", V.Local.sCntry)
+
+'"PONumb*!*VendNM*!*VendCD*!*PartNo*!*Descrp*!*Quntty*!*PtCost*!*XtCost*!*UntMsr*!*ProdLn*!*DuDate*!*WONumb*!*WOSuff*!*WOSeqc*!*GLAcct"
+'Now we fill the order lines.
+F.Intrinsic.UI.ChangeWaitStatus("Processing Lines")
+
+F.Intrinsic.Control.For(V.Local.iDrcla, 0, V.DataTable.dtPOEntry.RowCount--, 1)
+	
+	F.Intrinsic.Math.Add(V.Local.iDrcla, 1, V.Local.iOrdLn)
+	F.Intrinsic.String.LPad(V.Local.iOrdLn, "0", 3, V.Local.sOrdLn)
+	
+	F.Intrinsic.String.RPad(V.DataTable.dtPOEntry(V.Local.iDrcla).PartNo!FieldValTrim, " ", 20, V.Local.sPrtNo)
+	F.Intrinsic.String.Left(V.Local.sPrtNo, 20, V.Local.sPrtNo)
+	
+	F.Intrinsic.String.RPad(V.DataTable.dtPOEntry(V.Local.iDrcla).UntMsr!FieldValTrim, " ", 2, V.Local.sPrtUM)
+	F.Intrinsic.String.Left(V.Local.sPrtUM, 2, V.Local.sPrtUM)
+	
+	F.Intrinsic.String.RPad(V.DataTable.dtPOEntry(V.Local.iDrcla).Descrp!FieldValTrim, " ", 30, V.Local.sPtDsc)
+	F.Intrinsic.String.Left(V.Local.sPtDsc, 30, V.Local.sPtDsc)
+	
+	F.Intrinsic.String.LPad(V.DataTable.dtPOEntry(V.Local.iDrcla).WONumb!FieldValTrim, "0", 6, V.Local.sWONum)
+	F.Intrinsic.String.Right(V.Local.sWONum, 6, V.Local.sWONum)
+	F.Intrinsic.String.LPad(V.DataTable.dtPOEntry(V.Local.iDrcla).WOSuff!FieldValTrim, " ", 3, V.Local.sWOSuf)
+	F.Intrinsic.String.Right(V.Local.sWOSuf, 3, V.Local.sWOSuf)
+	F.Intrinsic.String.LPad(V.DataTable.dtPOEntry(V.Local.iDrcla).WOSeqc!FieldValTrim, "0", 6, V.Local.sWOSeq)
+	F.Intrinsic.String.Right(V.Local.sWOSuf, 6, V.Local.sWOSuf)
+	
+	F.Intrinsic.String.Format(V.DataTable.dtPOEntry(V.Local.iDrcla).PtCost!FieldValFloat, "#########.000000", V.Local.sPtCst)
+	F.Intrinsic.String.LPad(V.Local.sPtCst, "0", 16, V.Local.sPtCst)
+	
+	F.Intrinsic.String.Format(V.DataTable.dtPOEntry(V.Local.iDrcla).Quntty!FieldValFloat, "#########.000000", V.Local.sQuant)
+	F.Intrinsic.String.LPad(V.Local.sQuant, "0", 16, V.Local.sQuant)
+	
+	F.Intrinsic.String.Format(V.DataTable.dtPOEntry(V.Local.iDrcla).XtCost!FieldValFloat, "#########.000000", V.Local.sXTAmt)
+	F.Intrinsic.String.LPad(V.Local.sXTAmt, "0", 16, V.Local.sXTAmt)
+	
+	F.Intrinsic.String.Split(V.DataTable.dtPOEntry(V.Local.iDrcla).DuDate!FieldVal, " ", V.Local.sNowDt)
+	F.Intrinsic.String.Replace(V.Local.sNowDt(0), V.Ambient.DblQuote, "", V.Local.sNowDt)
+	F.Intrinsic.String.Split(V.Local.sNowDt(0), "/", V.Local.sNowDt)
+	V.Local.sNowDt.RedimPreserve(0, 2)
+	F.Intrinsic.String.LPad(V.Local.sNowDt(0), "0", 2, V.Local.sNowDt(0))
+	F.Intrinsic.String.LPad(V.Local.sNowDt(1), "0", 2, V.Local.sNowDt(1))
+	F.Intrinsic.String.Right(V.Local.sNowDt(2), 2, V.Local.sNowDt(2))
+	F.Intrinsic.String.Build("{0}{1}{2}", V.Local.sNowDt(0), V.Local.sNowDt(1), V.Local.sNowDt(2), V.Local.sDueDt)
+	
+	F.Intrinsic.String.RPad(V.DataTable.dtPOEntry(V.Local.iDrcla).GLAcct!FieldVal, " ", 15, V.Local.sGLAct)
+	F.Intrinsic.String.Left(V.Local.sGLAct, 15, V.Local.sGLAct)
+	
+	F.Intrinsic.Control.If(V.Local.sPrtNo.Trim, <>, "")
+		
+'		F.Data.DataTable.AddRow("UPLPURORL", "PONum", V.Local.sPONum, "RecType", V.Local.sOrdLn, "PartNum", V.Local.sPrtNo, "POUM", V.Local.sPrtUM, "PurchCost", V.Local.sPtCst, "PurchQtyOrdered", V.Local.sQuant, "ExchCurr", "USD", "PartDesc", V.Local.sPtDsc, "WONum", V.Local.sWONum, "WOSuffix", V.Local.sWOSuf, "WOSeq", V.Local.sWOSeq, "DueDate", V.Local.sDueDt, "ExtAmount", V.Local.sXTAmt)
+		F.Data.DataTable.AddRow("UPLPURORL", "PONum", V.Local.sPONum, "RecType", V.Local.sOrdLn, "PartNum", V.Local.sPrtNo, "POUM", V.Local.sPrtUM, "PurchCost", V.Local.sPtCst, "PurchQtyOrdered", V.Local.sQuant, "ExchCurr", "USD", "PartDesc", V.Local.sPtDsc, "WONum", V.Local.sWONum, "WOSuffix", V.Local.sWOSuf, "WOSeq", V.Local.sWOSeq, "DueDate", V.Local.sDueDt, "ExtAmount", V.Local.sXTAmt, "GLAcct", V.Local.sGLAct)
+		
+	F.Intrinsic.Control.EndIf
+	
+F.Intrinsic.Control.Next(V.Local.iDrcla)
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.String.Build("Project: {0}{1}{1}Subroutine: {2}{1}Error Occurred {3} with description {4}{1}{1}GAB Version: {5}",V.Ambient.ScriptPath,V.Ambient.Newline,V.Ambient.CurrentSubroutine,V.Ambient.ErrorNumber,V.Ambient.ErrorDescription,V.Ambient.GABVersion,V.Local.sError)
+	F.Intrinsic.UI.Msgbox(V.Local.sError)
+	F.Intrinsic.Control.CallSub(Unload)
+F.Intrinsic.Control.EndTry
+Program.Sub.FillOrderTables.End
